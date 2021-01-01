@@ -26,6 +26,7 @@ along with this program.  If not, see http://www.gnu.org/licenses/
 #include "../../ai/helpers/gambits_container.h"
 #include "../../ai/states/despawn_state.h"
 #include "../../ai/states/range_state.h"
+#include "../../ai/states/magic_state.h"
 #include "../../enmity_container.h"
 #include "../../entities/charentity.h"
 #include "../../entities/trustentity.h"
@@ -404,7 +405,65 @@ bool CTrustController::Cast(uint16 targid, SpellID spellid)
         targid = POwner->targid;
     }
 
-    return CMobController::Cast(targid, spellid);
+    auto PTarget      = (CBattleEntity*)POwner->GetEntity(targid, TYPE_MOB | TYPE_PC | TYPE_PET | TYPE_TRUST);
+    auto PSpellFamily = PSpell->getSpellFamily();
+    bool canDebuff    = true;
+    bool canCure      = true;
+    bool canBuff      = true;
+    bool canNa        = true;
+
+    static_cast<CCharEntity*>(POwner->PMaster)->ForPartyWithTrusts([&](CBattleEntity* PMember) {
+        if (PMember->objtype == TYPE_TRUST && PMember->PAI->IsCurrentState<CMagicState>())
+        {
+            auto MState = static_cast<CMagicState*>(PMember->PAI->GetCurrentState());
+
+            if (MState)
+            {
+                auto MSpell       = MState->GetSpell();
+                auto MTarget      = MState->GetTarget();
+                auto MSpellFamily = MSpell->getSpellFamily();
+                auto MSpellID     = MSpell->getID();
+
+                if (PSpell->isBuff())
+                {
+                    if (PSpellFamily == MSpellFamily && spellid <= MSpellID)
+                    {
+                        canBuff = false;
+                    }
+                }
+                if (PSpell->isCure())
+                {
+                    if (PTarget == MTarget && PTarget->GetHPP() > 50)
+                    {
+                        canCure = false;
+                    }
+                }
+                if (PSpell->isDebuff())
+                {
+                    if (PSpellFamily == MSpellFamily && spellid <= MSpellID)
+                    {
+                        canDebuff = false;
+                    }
+                }
+                if (PSpell->isNa())
+                {
+                    if (PSpellFamily == MSpellFamily && spellid == MSpellID)
+                    {
+                        canNa = false;
+                    }
+                }
+            }
+        }
+    });
+
+    if (!canBuff || !canNa || !canCure || !canDebuff)
+    {
+        return false;
+    }
+    else
+    {
+        return CController::Cast(targid, spellid);
+    }
 }
 
 CBattleEntity* CTrustController::GetTopEnmity()
